@@ -1,0 +1,6 @@
+customer_id,age,income,city,churn
+1,24,52000,Tampa,No
+2,31,68000,Miami,No
+3,45,91000,Tampa,Yes
+4,,73000,Orlando,No
+5,29,58000,Tampa,Yes
