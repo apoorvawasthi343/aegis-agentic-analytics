@@ -1,0 +1,15 @@
+[project]
+name = "aegis-agentic-analytics"
+version = "0.1.0"
+description = "Agentic AI framework for automated exploratory data analysis and feature engineering"
+requires-python = ">=3.12"
+dependencies = [
+    "pandas",
+    "numpy",
+    "pydantic",
+]
+
+[project.optional-dependencies]
+dev = [
+    "pytest",
+]
