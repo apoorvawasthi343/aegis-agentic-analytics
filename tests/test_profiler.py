@@ -48,3 +48,20 @@ def test_profile_dataset_unique_values_by_column():
     assert result["unique_values_by_column"]["repeated"] == 2
     assert result["unique_values_by_column"]["all_unique"] == 4
     assert result["unique_values_by_column"]["with_missing"] == 2
+
+
+def test_profile_dataset_data_types_by_column():
+    """Column dtype strings are reported correctly for each type."""
+    df = pd.DataFrame({
+        "ints": [1, 2, 3],
+        "floats": [1.5, 2.5, 3.5],
+        "text": ["a", "b", "c"],
+        "bools": [True, False, True],
+    })
+
+    result = profile_dataset(df)
+
+    assert result["data_types_by_column"]["ints"] == "int64"
+    assert result["data_types_by_column"]["floats"] == "float64"
+    assert result["data_types_by_column"]["text"] == "str"
+    assert result["data_types_by_column"]["bools"] == "bool"
