@@ -33,3 +33,18 @@ def test_profile_dataset_missing_values_by_column():
 
     assert result["missing_values_by_column"]["age"] == 1
     assert result["missing_values_by_column"]["income"] == 0
+
+
+def test_profile_dataset_unique_values_by_column():
+    """Unique value counts are reported per column and exclude missing values."""
+    df = pd.DataFrame({
+        "repeated": [1, 1, 2, 2],
+        "all_unique": [10, 20, 30, 40],
+        "with_missing": [1, 2, None, 2],
+    })
+
+    result = profile_dataset(df)
+
+    assert result["unique_values_by_column"]["repeated"] == 2
+    assert result["unique_values_by_column"]["all_unique"] == 4
+    assert result["unique_values_by_column"]["with_missing"] == 2
