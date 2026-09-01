@@ -23,3 +23,13 @@ def test_profile_dataset_duplicate_count():
     result = profile_dataset(df)
 
     assert result["duplicate_row_count"] == 1
+
+
+def test_profile_dataset_missing_values_by_column():
+    """Missing value counts are reported per column correctly."""
+    df = pd.DataFrame({"age": [24, None, 45], "income": [52000, 68000, 91000]})
+
+    result = profile_dataset(df)
+
+    assert result["missing_values_by_column"]["age"] == 1
+    assert result["missing_values_by_column"]["income"] == 0
