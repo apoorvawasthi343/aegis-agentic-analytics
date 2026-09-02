@@ -65,3 +65,71 @@ def test_profile_dataset_data_types_by_column():
     assert result["data_types_by_column"]["floats"] == "float64"
     assert result["data_types_by_column"]["text"] == "str"
     assert result["data_types_by_column"]["bools"] == "bool"
+
+
+def test_profile_dataset_numeric_statistics():
+    """Numeric statistics are computed correctly and only include numeric columns."""
+    df = pd.DataFrame({
+        "ints": [10, 20, 30],
+        "floats": [1.0, 2.0, 8.0],
+        "text": ["a", "b", "c"],
+        "with_missing": [4, None, 8],
+    })
+
+    result = profile_dataset(df)
+
+    stats = result["numeric_statistics"]
+
+    # Only numeric columns should appear
+    assert set(stats.keys()) == {"ints", "floats", "with_missing"}
+    assert "text" not in stats
+
+    # Integer column
+    assert stats["ints"]["mean"] == pytest.approx(20.0)
+    assert stats["ints"]["median"] == pytest.approx(20.0)
+    assert stats["ints"]["std"] == pytest.approx(10.0)
+    assert stats["ints"]["min"] == 10.0
+    assert stats["ints"]["max"] == 30.0
+
+    # Float column
+    assert stats["floats"]["mean"] == pytest.approx(3.6666666666666665)
+    assert stats["floats"]["median"] == pytest.approx(2.0)
+    assert stats["floats"]["min"] == 1.0
+    assert stats["floats"]["max"] == 8.0
+
+    # Column with missing value (pandas ignores NaN)
+    assert stats["with_missing"]["mean"] == pytest.approx(6.0)
+    assert stats["with_missing"]["median"] == pytest.approx(6.0)
+    assert stats["with_missing"]["min"] == 4.0
+    assert stats["with_missing"]["max"] == 8.0
+    # std with 2 values: sqrt(((4-6)^2 + (8-6)^2) / (2-1)) = sqrt(8) ≈ 2.828
+    assert stats["with_missing"]["std"] == pytest.approx(2.8284271247461903)
+
+
+def test_profile_dataset_categorical_statistics():
+    """Categorical statistics report most frequent value and count correctly."""
+    df = pd.DataFrame({
+        "repeated_cat": ["a", "a", "b", "b", "a"],
+        "with_missing_cat": ["x", None, "x", "y", "x"],
+        "numeric_col": [1, 2, 3, 4, 5],
+        "all_missing_cat": [None, None, None, None, None],
+    })
+
+    result = profile_dataset(df)
+    cat = result["categorical_statistics"]
+
+    # Only non-numeric columns appear
+    assert set(cat.keys()) == {"repeated_cat", "with_missing_cat", "all_missing_cat"}
+    assert "numeric_col" not in cat
+
+    # Repeated categorical column
+    assert cat["repeated_cat"]["most_frequent_value"] == "a"
+    assert cat["repeated_cat"]["most_frequent_count"] == 3
+
+    # Categorical column with one missing value (missing ignored)
+    assert cat["with_missing_cat"]["most_frequent_value"] == "x"
+    assert cat["with_missing_cat"]["most_frequent_count"] == 3
+
+    # All-missing categorical column handled safely
+    assert cat["all_missing_cat"]["most_frequent_value"] is None
+    assert cat["all_missing_cat"]["most_frequent_count"] == 0
