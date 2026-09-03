@@ -2,6 +2,8 @@
 
 from abc import ABC, abstractmethod
 
+from pydantic import BaseModel
+
 
 class LLMClient(ABC):
     """Abstract interface for LLM-backed text generation.
@@ -13,11 +15,19 @@ class LLMClient(ABC):
     """
 
     @abstractmethod
-    def generate(self, prompt: str) -> str:
+    def generate(
+        self,
+        prompt: str,
+        response_schema: type[BaseModel] | None = None,
+    ) -> str:
         """Send a prompt to the model and return the generated text.
 
         Args:
             prompt: The instruction or prompt to send to the model.
+            response_schema: Optional Pydantic model class used to request
+                structured output from the model. If provided, the client may
+                use this schema to guide output format. If None, the client
+                may still request JSON output where supported.
 
         Returns:
             The model-generated string response.

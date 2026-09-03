@@ -191,7 +191,10 @@ class DataQualityAgent:
 
         if self.llm_client is not None:
             prompt = build_data_quality_prompt(profile)
-            raw_response = self.llm_client.generate(prompt)
+            raw_response = self.llm_client.generate(
+                prompt,
+                response_schema=DataQualityReport,
+            )
 
             try:
                 llm_report = DataQualityReport.model_validate_json(raw_response)

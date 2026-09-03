@@ -341,9 +341,15 @@ class FakeLLMClient(LLMClient):
     def __init__(self, response_text: str = "") -> None:
         self.response_text = response_text
         self.received_prompt: str | None = None
+        self.received_schema: type | None = None
 
-    def generate(self, prompt: str) -> str:
+    def generate(
+        self,
+        prompt: str,
+        response_schema: type | None = None,
+    ) -> str:
         self.received_prompt = prompt
+        self.received_schema = response_schema
         return self.response_text
 
 
@@ -392,6 +398,9 @@ def test_llm_finding_is_merged_into_report() -> None:
     assert len(report.findings) == 2
     assert report.summary == "2 data-quality issue(s) detected."
 
+    # Verify the LLM client received DataQualityReport as the response_schema
+    assert llm_client.received_schema is DataQualityReport
+
 
 def test_prompt_is_passed_to_fake_client() -> None:
     """The prompt built from the profile is actually passed to the LLM client."""
@@ -433,4 +442,61 @@ def test_deterministic_findings_survive_llm_failure() -> None:
     assert len(missing_findings) == 1
     assert missing_findings[0].severity == "medium"
 
+    assert "LLM reasoning was requested" in report.summary
+
+
+def test_valid_structured_llm_json_is_accepted() -> None:
+    """Valid structured JSON matching DataQualityReport is accepted."""
+    valid_json = DataQualityReport(
+        findings=[
+            DataQualityFinding(
+                issue_type="llm_validated_finding",
+                severity="medium",
+                column="validated_column",
+                evidence="This finding was accepted by Pydantic validation.",
+                recommendation="Use validated findings.",
+            )
+        ],
+        summary="LLM validated structured output.",
+    ).model_dump_json()
+
+    llm_client = FakeLLMClient(response_text=valid_json)
+
+    profile = _make_profile(row_count=10)
+
+    agent = DataQualityAgent(llm_client=llm_client)
+    report = agent.analyze(profile)
+
+    llm_findings = [
+        f for f in report.findings if f.issue_type == "llm_validated_finding"
+    ]
+    assert len(llm_findings) == 1
+    assert llm_findings[0].column == "validated_column"
+
+
+def test_invalid_structured_output_falls_back_safely() -> None:
+    """Invalid structured LLM output does not crash; deterministic findings remain."""
+    # Simulate LLM returning malformed JSON that would fail Pydantic validation
+    llm_client = FakeLLMClient(response_text='{"invalid": "structure"}')
+
+    profile = _make_profile(
+        missing_values_by_column={"age": 10},
+        row_count=100,
+    )
+
+    agent = DataQualityAgent(llm_client=llm_client)
+    report = agent.analyze(profile)
+
+    # Deterministic findings must still be present
+    missing_findings = [f for f in report.findings if f.issue_type == "missing_values"]
+    assert len(missing_findings) == 1
+    assert missing_findings[0].severity == "medium"
+
+    # LLM findings should NOT be present (validation failed)
+    llm_findings = [
+        f for f in report.findings if f.issue_type not in ("missing_values",)
+    ]
+    assert len(llm_findings) == 0
+
+    # Summary should note the LLM validation failure
     assert "LLM reasoning was requested" in report.summary
