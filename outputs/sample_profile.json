@@ -1,0 +1,64 @@
+{
+  "row_count": 5,
+  "column_count": 5,
+  "duplicate_row_count": 0,
+  "missing_values_by_column": {
+    "customer_id": 0,
+    "age": 1,
+    "income": 0,
+    "city": 0,
+    "churn": 0
+  },
+  "unique_values_by_column": {
+    "customer_id": 5,
+    "age": 4,
+    "income": 5,
+    "city": 3,
+    "churn": 2
+  },
+  "data_types_by_column": {
+    "customer_id": "int64",
+    "age": "float64",
+    "income": "int64",
+    "city": "str",
+    "churn": "str"
+  },
+  "numeric_statistics": {
+    "customer_id": {
+      "mean": 3.0,
+      "median": 3.0,
+      "std": 1.5811388300841898,
+      "min": 1.0,
+      "max": 5.0
+    },
+    "age": {
+      "mean": 32.25,
+      "median": 30.0,
+      "std": 8.99536917900909,
+      "min": 24.0,
+      "max": 45.0
+    },
+    "income": {
+      "mean": 68400.0,
+      "median": 68000.0,
+      "std": 15076.471735787522,
+      "min": 52000.0,
+      "max": 91000.0
+    }
+  },
+  "categorical_statistics": {
+    "city": {
+      "most_frequent_value": "Tampa",
+      "most_frequent_count": 3
+    },
+    "churn": {
+      "most_frequent_value": "No",
+      "most_frequent_count": 3
+    }
+  },
+  "target_column": "churn",
+  "target_distribution": {
+    "No": 3,
+    "Yes": 2
+  }
+}
