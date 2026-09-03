@@ -1,8 +1,11 @@
 """Tests for the AEGIS Data Quality Agent."""
 
+import json
+
 import pytest
 
 from src.aegis.data_quality_agent import DataQualityAgent
+from src.aegis.llm import LLMClient
 from src.aegis.schemas import (
     CategoricalStat,
     DataQualityFinding,
@@ -330,3 +333,104 @@ def test_combined_missing_and_constant_findings() -> None:
 
     assert len(report.findings) == 2
     assert report.summary == "2 data-quality issue(s) detected."
+
+
+class FakeLLMClient(LLMClient):
+    """Minimal fake LLM client for tests."""
+
+    def __init__(self, response_text: str = "") -> None:
+        self.response_text = response_text
+        self.received_prompt: str | None = None
+
+    def generate(self, prompt: str) -> str:
+        self.received_prompt = prompt
+        return self.response_text
+
+
+def test_agent_works_without_llm_client() -> None:
+    """DataQualityAgent still works when no LLM client is provided."""
+    profile = _make_profile(missing_values_by_column={"age": 1})
+
+    report = DataQualityAgent().analyze(profile)
+
+    assert len(report.findings) == 1
+    assert report.findings[0].issue_type == "missing_values"
+    assert "LLM" not in report.summary
+
+
+def test_llm_finding_is_merged_into_report() -> None:
+    """With a fake LLM client, the LLM finding is added to the final report."""
+    llm_client = FakeLLMClient(
+        response_text=json.dumps(
+            {
+                "findings": [
+                    {
+                        "issue_type": "possible_leakage",
+                        "severity": "high",
+                        "column": "customer_id",
+                        "evidence": "The supplied profile shows this column is unique for every row.",
+                        "recommendation": "Review whether this field is an identifier and exclude it from predictive features if appropriate.",
+                    }
+                ],
+                "summary": "LLM analysis completed.",
+            }
+        )
+    )
+
+    profile = _make_profile(
+        unique_values_by_column={"customer_id": 100},
+        row_count=100,
+    )
+
+    agent = DataQualityAgent(llm_client=llm_client)
+    report = agent.analyze(profile)
+
+    issue_types = {f.issue_type for f in report.findings}
+    assert "high_cardinality" in issue_types
+    assert "possible_leakage" in issue_types
+
+    assert len(report.findings) == 2
+    assert report.summary == "2 data-quality issue(s) detected."
+
+
+def test_prompt_is_passed_to_fake_client() -> None:
+    """The prompt built from the profile is actually passed to the LLM client."""
+    llm_client = FakeLLMClient(response_text=json.dumps({"findings": [], "summary": ""}))
+
+    profile = _make_profile(row_count=10)
+
+    agent = DataQualityAgent(llm_client=llm_client)
+    agent.analyze(profile)
+
+    assert llm_client.received_prompt is not None
+    assert "row_count" in llm_client.received_prompt
+    assert "10" in llm_client.received_prompt
+
+
+def test_invalid_llm_json_does_not_crash_agent() -> None:
+    """Invalid JSON from the LLM does not crash the agent."""
+    llm_client = FakeLLMClient(response_text="this is not json")
+
+    profile = _make_profile(row_count=10)
+
+    agent = DataQualityAgent(llm_client=llm_client)
+    report = agent.analyze(profile)
+
+    assert len(report.findings) == 0
+    assert "LLM reasoning was requested" in report.summary
+
+
+def test_deterministic_findings_survive_llm_failure() -> None:
+    """Deterministic findings are still present when LLM validation fails."""
+    llm_client = FakeLLMClient(response_text="not valid json")
+
+    profile = _make_profile(missing_values_by_column={"age": 20}, row_count=100)
+
+    agent = DataQualityAgent(llm_client=llm_client)
+    report = agent.analyze(profile)
+
+    missing_findings = [f for f in report.findings if f.issue_type == "missing_values"]
+    assert len(missing_findings) == 1
+    assert missing_findings[0].severity == "medium"
+
+    assert "LLM reasoning was requested" in report.summary
