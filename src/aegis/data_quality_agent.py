@@ -6,27 +6,37 @@ from src.aegis.schemas import DataQualityFinding, DataQualityReport, DatasetProf
 class DataQualityAgent:
     """Agent that analyzes dataset profiles and produces data quality reports.
 
-    Currently implements deterministic missing-value detection. Additional
-    checks (duplicates, cardinality, invalid values, etc.) and LLM-based
-    analysis will be added in later milestones.
+    Currently implements deterministic detection of:
+
+    * Missing values per column (``profile.missing_values_by_column``)
+    * Duplicate rows (``profile.duplicate_row_count``)
+    * High-cardinality / possible identifier columns
+      (``profile.unique_values_by_column``)
+
+    Additional checks (invalid values, etc.) and LLM-based analysis will be
+    added in later milestones.
     """
 
     def analyze(self, profile: DatasetProfile) -> DataQualityReport:
         """Analyze a dataset profile and return a data quality report.
 
-        Performs deterministic missing-value detection against
-        ``profile.missing_values_by_column``.
+        Performs deterministic detection of:
+
+        * Missing values per column
+        * Duplicate rows
+        * High-cardinality / possible identifier columns
 
         Args:
             profile: The DatasetProfile to analyze.
 
         Returns:
-            A DataQualityReport containing missing-value findings (if any)
-            and a summary line describing how many issues were detected.
+            A DataQualityReport containing any findings and a summary line
+            reporting the total number of issues detected.
         """
         findings: list[DataQualityFinding] = []
-        row_count = profile.row_count or 1  # avoid division by zero
+        row_count = profile.row_count or 1
 
+        # --- Missing value detection ---
         for column, missing_count in profile.missing_values_by_column.items():
             if missing_count <= 0:
                 continue
@@ -60,11 +70,78 @@ class DataQualityAgent:
                 )
             )
 
-        summary = (
-            f"{len(findings)} missing-value issue(s) detected."
-            if findings
-            else "No missing-value issues detected."
-        )
+        # --- Duplicate row detection ---
+        duplicate_count = profile.duplicate_row_count
+        if duplicate_count and duplicate_count > 0:
+            duplicate_pct = (duplicate_count / row_count) * 100.0
+
+            if duplicate_pct <= 2.0:
+                severity = "low"
+            elif duplicate_pct <= 10.0:
+                severity = "medium"
+            else:
+                severity = "high"
+
+            evidence = (
+                f"The dataset contains {duplicate_count} duplicate row(s), "
+                f"which is {duplicate_pct:.2f}% of the {row_count} rows."
+            )
+            recommendation = (
+                "Investigate whether these duplicates represent legitimate "
+                "repeated observations or should be removed before modeling."
+            )
+
+            findings.append(
+                DataQualityFinding(
+                    issue_type="duplicate_rows",
+                    severity=severity,
+                    column=None,
+                    evidence=evidence,
+                    recommendation=recommendation,
+                )
+            )
+
+        # --- High cardinality / possible identifier detection ---
+        actual_row_count = profile.row_count
+        if actual_row_count > 0:
+            for column, unique_count in profile.unique_values_by_column.items():
+                cardinality_ratio = unique_count / actual_row_count
+
+                if cardinality_ratio >= 0.95:
+                    cardinality_pct = cardinality_ratio * 100.0
+
+                    if cardinality_pct >= 99.0:
+                        severity = "high"
+                    else:
+                        severity = "medium"
+
+                    evidence = (
+                        f"Column '{column}' has {unique_count} unique value(s) "
+                        f"out of {actual_row_count} rows, which is {cardinality_pct:.2f}% "
+                        f"of the dataset."
+                    )
+                    recommendation = (
+                        "This column may be an identifier or too high-cardinality "
+                        "for direct modeling. Review its role before feature "
+                        "engineering (e.g. consider grouping rare values, target "
+                        "encoding, or dropping it)."
+                    )
+
+                    findings.append(
+                        DataQualityFinding(
+                            issue_type="high_cardinality",
+                            severity=severity,
+                            column=column,
+                            evidence=evidence,
+                            recommendation=recommendation,
+                        )
+                    )
+
+        # --- Summary ---
+        if findings:
+            summary = f"{len(findings)} data-quality issue(s) detected."
+        else:
+            summary = "No data-quality issues detected."
 
         return DataQualityReport(
             findings=findings,
