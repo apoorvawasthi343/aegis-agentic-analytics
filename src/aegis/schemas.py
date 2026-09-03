@@ -35,3 +35,20 @@ class DatasetProfile(BaseModel):
     categorical_statistics: dict[str, CategoricalStat]
     target_column: Optional[str] = None
     target_distribution: Optional[dict[str, int]] = None
+
+
+class DataQualityFinding(BaseModel):
+    """A single data quality issue detected in a dataset."""
+
+    issue_type: str
+    severity: str
+    column: Optional[str] = None
+    evidence: str
+    recommendation: str
+
+
+class DataQualityReport(BaseModel):
+    """Structured report of data quality findings for a dataset."""
+
+    findings: list[DataQualityFinding]
+    summary: str
