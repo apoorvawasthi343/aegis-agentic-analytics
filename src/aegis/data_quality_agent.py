@@ -12,6 +12,8 @@ class DataQualityAgent:
     * Duplicate rows (``profile.duplicate_row_count``)
     * High-cardinality / possible identifier columns
       (``profile.unique_values_by_column``)
+    * Constant columns / near-zero variance
+      (``profile.unique_values_by_column``)
 
     Additional checks (invalid values, etc.) and LLM-based analysis will be
     added in later milestones.
@@ -25,6 +27,7 @@ class DataQualityAgent:
         * Missing values per column
         * Duplicate rows
         * High-cardinality / possible identifier columns
+        * Constant columns / near-zero variance
 
         Args:
             profile: The DatasetProfile to analyze.
@@ -105,6 +108,9 @@ class DataQualityAgent:
         actual_row_count = profile.row_count
         if actual_row_count > 0:
             for column, unique_count in profile.unique_values_by_column.items():
+                if unique_count < 1:
+                    continue
+
                 cardinality_ratio = unique_count / actual_row_count
 
                 if cardinality_ratio >= 0.95:
@@ -136,6 +142,32 @@ class DataQualityAgent:
                             recommendation=recommendation,
                         )
                     )
+
+        # --- Constant column / near-zero variance detection ---
+        # Only flag columns with exactly one unique non-null value.
+        # Do not treat an entirely missing column (0 unique non-null values)
+        # as a constant column in this rule.
+        for column, unique_count in profile.unique_values_by_column.items():
+            if unique_count == 1:
+                evidence = (
+                    f"Column '{column}' contains only 1 unique non-null value "
+                    f"across the {actual_row_count} rows in the dataset."
+                )
+                recommendation = (
+                    "This column provides little or no predictive information "
+                    "and should be reviewed for removal before modeling "
+                    "(unless it is a deliberately constant flag or control column)."
+                )
+
+                findings.append(
+                    DataQualityFinding(
+                        issue_type="constant_column",
+                        severity="medium",
+                        column=column,
+                        evidence=evidence,
+                        recommendation=recommendation,
+                    )
+                )
 
         # --- Summary ---
         if findings:

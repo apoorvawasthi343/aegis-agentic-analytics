@@ -250,7 +250,7 @@ def test_combined_missing_and_high_cardinality_findings():
     assert report.summary == "2 data-quality issue(s) detected."
 
 
-def test_row_count_zero_does_not_flag_high_cardinality():
+def test_row_count_zero_does_not_flag_high_cardinality() -> None:
     """When row_count is 0, high cardinality columns are not flagged."""
     profile = _make_profile(
         unique_values_by_column={"id": 10},
@@ -261,3 +261,72 @@ def test_row_count_zero_does_not_flag_high_cardinality():
 
     high_card_findings = [f for f in report.findings if f.issue_type == "high_cardinality"]
     assert len(high_card_findings) == 0
+
+
+def test_constant_column_is_flagged() -> None:
+    """A column with exactly 1 unique non-null value is flagged as constant."""
+    profile = _make_profile(
+        unique_values_by_column={"status": 1, "id": 5},
+        row_count=20,
+    )
+
+    report = DataQualityAgent().analyze(profile)
+
+    constant_findings = [
+        f for f in report.findings if f.issue_type == "constant_column"
+    ]
+    assert len(constant_findings) == 1
+
+    attrs = _finding_attrs(constant_findings[0])
+    assert attrs["column"] == "status"
+    assert attrs["severity"] == "medium"
+    assert "only 1 unique non-null value" in attrs["evidence"]
+    assert "20 rows" in attrs["evidence"]
+
+
+def test_normal_column_is_not_flagged_as_constant() -> None:
+    """A column with more than 1 unique value is not flagged."""
+    profile = _make_profile(
+        unique_values_by_column={"category": 3},
+        row_count=100,
+    )
+
+    report = DataQualityAgent().analyze(profile)
+
+    constant_findings = [
+        f for f in report.findings if f.issue_type == "constant_column"
+    ]
+    assert len(constant_findings) == 0
+
+
+def test_all_missing_column_is_not_flagged_as_constant() -> None:
+    """A column with 0 unique non-null values is not treated as constant."""
+    profile = _make_profile(
+        missing_values_by_column={"label": 100},
+        unique_values_by_column={"label": 0},
+        row_count=100,
+    )
+
+    report = DataQualityAgent().analyze(profile)
+
+    constant_findings = [
+        f for f in report.findings if f.issue_type == "constant_column"
+    ]
+    assert len(constant_findings) == 0
+
+
+def test_combined_missing_and_constant_findings() -> None:
+    """Missing values and a constant column both produce findings."""
+    profile = _make_profile(
+        missing_values_by_column={"age": 20},
+        unique_values_by_column={"flag": 1},
+        row_count=100,
+    )
+
+    report = DataQualityAgent().analyze(profile)
+
+    issue_types = {f.issue_type for f in report.findings}
+    assert issue_types == {"missing_values", "constant_column"}
+
+    assert len(report.findings) == 2
+    assert report.summary == "2 data-quality issue(s) detected."
