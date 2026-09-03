@@ -4,6 +4,7 @@ import pandas as pd
 import pytest
 
 from src.aegis.profiler import profile_dataset
+from src.aegis.schemas import DatasetProfile, NumericStats, CategoricalStat
 
 
 def test_profile_dataset_basic_counts():
@@ -12,8 +13,9 @@ def test_profile_dataset_basic_counts():
 
     result = profile_dataset(df)
 
-    assert result["row_count"] == 3
-    assert result["column_count"] == 2
+    assert isinstance(result, DatasetProfile)
+    assert result.row_count == 3
+    assert result.column_count == 2
 
 
 def test_profile_dataset_duplicate_count():
@@ -22,7 +24,7 @@ def test_profile_dataset_duplicate_count():
 
     result = profile_dataset(df)
 
-    assert result["duplicate_row_count"] == 1
+    assert result.duplicate_row_count == 1
 
 
 def test_profile_dataset_missing_values_by_column():
@@ -31,8 +33,8 @@ def test_profile_dataset_missing_values_by_column():
 
     result = profile_dataset(df)
 
-    assert result["missing_values_by_column"]["age"] == 1
-    assert result["missing_values_by_column"]["income"] == 0
+    assert result.missing_values_by_column["age"] == 1
+    assert result.missing_values_by_column["income"] == 0
 
 
 def test_profile_dataset_unique_values_by_column():
@@ -45,9 +47,9 @@ def test_profile_dataset_unique_values_by_column():
 
     result = profile_dataset(df)
 
-    assert result["unique_values_by_column"]["repeated"] == 2
-    assert result["unique_values_by_column"]["all_unique"] == 4
-    assert result["unique_values_by_column"]["with_missing"] == 2
+    assert result.unique_values_by_column["repeated"] == 2
+    assert result.unique_values_by_column["all_unique"] == 4
+    assert result.unique_values_by_column["with_missing"] == 2
 
 
 def test_profile_dataset_data_types_by_column():
@@ -61,10 +63,10 @@ def test_profile_dataset_data_types_by_column():
 
     result = profile_dataset(df)
 
-    assert result["data_types_by_column"]["ints"] == "int64"
-    assert result["data_types_by_column"]["floats"] == "float64"
-    assert result["data_types_by_column"]["text"] == "str"
-    assert result["data_types_by_column"]["bools"] == "bool"
+    assert result.data_types_by_column["ints"] == "int64"
+    assert result.data_types_by_column["floats"] == "float64"
+    assert result.data_types_by_column["text"] == "str"
+    assert result.data_types_by_column["bools"] == "bool"
 
 
 def test_profile_dataset_numeric_statistics():
@@ -78,32 +80,32 @@ def test_profile_dataset_numeric_statistics():
 
     result = profile_dataset(df)
 
-    stats = result["numeric_statistics"]
+    stats: dict[str, NumericStats] = result.numeric_statistics
 
     # Only numeric columns should appear
     assert set(stats.keys()) == {"ints", "floats", "with_missing"}
     assert "text" not in stats
 
     # Integer column
-    assert stats["ints"]["mean"] == pytest.approx(20.0)
-    assert stats["ints"]["median"] == pytest.approx(20.0)
-    assert stats["ints"]["std"] == pytest.approx(10.0)
-    assert stats["ints"]["min"] == 10.0
-    assert stats["ints"]["max"] == 30.0
+    assert stats["ints"].mean == pytest.approx(20.0)
+    assert stats["ints"].median == pytest.approx(20.0)
+    assert stats["ints"].std == pytest.approx(10.0)
+    assert stats["ints"].min == 10.0
+    assert stats["ints"].max == 30.0
 
     # Float column
-    assert stats["floats"]["mean"] == pytest.approx(3.6666666666666665)
-    assert stats["floats"]["median"] == pytest.approx(2.0)
-    assert stats["floats"]["min"] == 1.0
-    assert stats["floats"]["max"] == 8.0
+    assert stats["floats"].mean == pytest.approx(3.6666666666666665)
+    assert stats["floats"].median == pytest.approx(2.0)
+    assert stats["floats"].min == 1.0
+    assert stats["floats"].max == 8.0
 
     # Column with missing value (pandas ignores NaN)
-    assert stats["with_missing"]["mean"] == pytest.approx(6.0)
-    assert stats["with_missing"]["median"] == pytest.approx(6.0)
-    assert stats["with_missing"]["min"] == 4.0
-    assert stats["with_missing"]["max"] == 8.0
+    assert stats["with_missing"].mean == pytest.approx(6.0)
+    assert stats["with_missing"].median == pytest.approx(6.0)
+    assert stats["with_missing"].min == 4.0
+    assert stats["with_missing"].max == 8.0
     # std with 2 values: sqrt(((4-6)^2 + (8-6)^2) / (2-1)) = sqrt(8) ≈ 2.828
-    assert stats["with_missing"]["std"] == pytest.approx(2.8284271247461903)
+    assert stats["with_missing"].std == pytest.approx(2.8284271247461903)
 
 
 def test_profile_dataset_categorical_statistics():
@@ -116,20 +118,63 @@ def test_profile_dataset_categorical_statistics():
     })
 
     result = profile_dataset(df)
-    cat = result["categorical_statistics"]
+    cat: dict[str, CategoricalStat] = result.categorical_statistics
 
     # Only non-numeric columns appear
     assert set(cat.keys()) == {"repeated_cat", "with_missing_cat", "all_missing_cat"}
     assert "numeric_col" not in cat
 
     # Repeated categorical column
-    assert cat["repeated_cat"]["most_frequent_value"] == "a"
-    assert cat["repeated_cat"]["most_frequent_count"] == 3
+    assert cat["repeated_cat"].most_frequent_value == "a"
+    assert cat["repeated_cat"].most_frequent_count == 3
 
     # Categorical column with one missing value (missing ignored)
-    assert cat["with_missing_cat"]["most_frequent_value"] == "x"
-    assert cat["with_missing_cat"]["most_frequent_count"] == 3
+    assert cat["with_missing_cat"].most_frequent_value == "x"
+    assert cat["with_missing_cat"].most_frequent_count == 3
 
     # All-missing categorical column handled safely
-    assert cat["all_missing_cat"]["most_frequent_value"] is None
-    assert cat["all_missing_cat"]["most_frequent_count"] == 0
+    assert cat["all_missing_cat"].most_frequent_value is None
+    assert cat["all_missing_cat"].most_frequent_count == 0
+
+
+def test_profile_dataset_returns_dataset_profile():
+    """profile_dataset returns a DatasetProfile that can be serialized to JSON."""
+    df = pd.DataFrame({"a": [1, 2, 3]})
+
+    result = profile_dataset(df)
+
+    assert isinstance(result, DatasetProfile)
+    json_str = result.model_dump_json()
+    assert isinstance(json_str, str)
+    assert len(json_str) > 0
+
+
+def test_profile_dataset_target_column_categorical():
+    """A valid categorical target column reports target_column and target_distribution."""
+    df = pd.DataFrame({
+        "feature": [1, 2, 3, 4],
+        "label": ["Yes", "No", "Yes", "No"],
+    })
+
+    result = profile_dataset(df, target_column="label")
+
+    assert result.target_column == "label"
+    assert result.target_distribution == {"Yes": 2, "No": 2}
+
+
+def test_profile_dataset_no_target_column():
+    """When no target column is provided, target fields remain None."""
+    df = pd.DataFrame({"x": [1, 2, 3]})
+
+    result = profile_dataset(df)
+
+    assert result.target_column is None
+    assert result.target_distribution is None
+
+
+def test_profile_dataset_missing_target_column():
+    """A non-existent target column raises ValueError."""
+    df = pd.DataFrame({"x": [1, 2, 3]})
+
+    with pytest.raises(ValueError, match="not found in DataFrame"):
+        profile_dataset(df, target_column="nonexistent")
