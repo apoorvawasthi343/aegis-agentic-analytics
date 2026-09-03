@@ -52,3 +52,41 @@ class DataQualityReport(BaseModel):
 
     findings: list[DataQualityFinding]
     summary: str
+
+
+class EDAFinding(BaseModel):
+    """A single exploratory data analysis finding in a dataset.
+
+    EDAFindings capture patterns and insights useful for understanding
+    the data before modeling, such as distributions, relationships,
+    imbalance, and potential predictive signals.
+    """
+
+    finding_type: str
+    """Category of the finding (e.g. 'distribution', 'imbalance', 'relationship')."""
+
+    importance: str
+    """How important this finding is for modeling: 'low', 'medium', or 'high'."""
+
+    columns: list[str]
+    """Columns involved in or related to this finding."""
+
+    evidence: str
+    """Observable data evidence supporting this finding."""
+
+    interpretation: str
+    """What this finding means in plain language."""
+
+    modeling_implication: str | None = None
+    """Suggested impact or next step for modeling, or None if not applicable."""
+
+
+class EDAReport(BaseModel):
+    """Structured exploratory data analysis report for a dataset.
+
+    EDAReports collect EDAFindings along with an overall summary
+    of the most important patterns discovered.
+    """
+
+    findings: list[EDAFinding]
+    summary: str
