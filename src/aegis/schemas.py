@@ -1,4 +1,10 @@
-"""Pydantic schemas for AEGIS modeling results."""
+"""Pydantic schemas for AEGIS orchestration results.
+
+Provides the OrchestrationResult schema that collects outputs from all
+AEGIS pipeline stages into a single structured result.
+"""
+
+from __future__ import annotations
 
 from typing import Any, Optional
 
@@ -35,6 +41,7 @@ class DatasetProfile(BaseModel):
     categorical_statistics: dict[str, CategoricalStat]
     target_column: Optional[str] = None
     target_distribution: Optional[dict[str, int]] = None
+    summary: str = ""
 
 
 class DataQualityFinding(BaseModel):
@@ -55,38 +62,18 @@ class DataQualityReport(BaseModel):
 
 
 class EDAFinding(BaseModel):
-    """A single exploratory data analysis finding in a dataset.
-
-    EDAFindings capture patterns and insights useful for understanding
-    the data before modeling, such as distributions, relationships,
-    imbalance, and potential predictive signals.
-    """
+    """A single exploratory data analysis finding in a dataset."""
 
     finding_type: str
-    """Category of the finding (e.g. 'distribution', 'imbalance', 'relationship')."""
-
     importance: str
-    """How important this finding is for modeling: 'low', 'medium', or 'high'."""
-
     columns: list[str]
-    """Columns involved in or related to this finding."""
-
     evidence: str
-    """Observable data evidence supporting this finding."""
-
     interpretation: str
-    """What this finding means in plain language."""
-
-    modeling_implication: str | None = None
-    """Suggested impact or next step for modeling, or None if not applicable."""
+    modeling_implication: Optional[str] = None
 
 
 class EDAReport(BaseModel):
-    """Structured exploratory data analysis report for a dataset.
-
-    EDAReports collect EDAFindings along with an overall summary
-    of the most important patterns discovered.
-    """
+    """Structured exploratory data analysis report for a dataset."""
 
     findings: list[EDAFinding]
     summary: str
@@ -113,23 +100,12 @@ class ModelingReport(BaseModel):
 
 
 class FeatureEngineeringSpec(BaseModel):
-    """Specification for a single requested feature engineering transformation.
-
-    Used by callers (e.g. an LLM-based planner) to request a specific
-    transformation that the executor will attempt to apply safely.
-    """
+    """Specification for a single feature engineering transformation."""
 
     feature_name: str
-    """Human-readable name for the engineered feature column."""
-
     transformation_type: str
-    """Type of transformation: 'log1p', 'ratio', 'missing_indicator', 'count_sum'."""
-
     columns: list[str]
-    """Columns involved in the transformation."""
-
-    parameters: dict[str, Any] = {}
-    """Optional extra parameters for the transformation."""
+    parameters: Optional[dict[str, Any]] = None
 
 
 class AppliedFeature(BaseModel):
@@ -160,3 +136,48 @@ class FeatureEngineeringReport(BaseModel):
     applied_features: list[AppliedFeature]
     skipped_features: list[SkippedFeature]
     summary: str
+
+
+class BaselineVsEngineeredComparison(BaseModel):
+    """Comparison of baseline vs. feature-engineered model performance."""
+
+    baseline_metrics: ModelMetrics
+    engineered_metrics: ModelMetrics
+    features_created: list[str]
+    features_skipped: list[str]
+    accuracy_change: float
+    f1_change: float
+    roc_auc_change: Optional[float] = None
+    improved: bool
+    summary: str
+
+
+class CriticReport(BaseModel):
+    """Result of a critic's review of a feature-engineering comparison."""
+
+    decision: str
+    accepted_features: list[str]
+    rejected_features: list[str]
+    reasons: list[str]
+    performance_improved: bool
+    leakage_warning: bool
+    summary: str
+
+
+class OrchestrationResult(BaseModel):
+    """Complete orchestration result from the AEGIS pipeline.
+
+    Collects outputs from all pipeline stages:
+    profiling → data quality → EDA → feature engineering →
+    modeling comparison → critic review
+    """
+
+    dataset_profile: DatasetProfile
+    data_quality_report: DataQualityReport
+    eda_report: EDAReport
+    feature_engineering_report: FeatureEngineeringReport
+    created_features: list[str]
+    skipped_features: list[str]
+    modeling_comparison: BaselineVsEngineeredComparison
+    critic_report: CriticReport
+    summary: str = ""
