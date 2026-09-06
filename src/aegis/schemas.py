@@ -1,4 +1,4 @@
-"""Pydantic schemas for AEGIS dataset profiling results."""
+"""Pydantic schemas for AEGIS modeling results."""
 
 from typing import Any, Optional
 
@@ -89,4 +89,74 @@ class EDAReport(BaseModel):
     """
 
     findings: list[EDAFinding]
+    summary: str
+
+
+class ModelMetrics(BaseModel):
+    """Performance metrics for a trained classification model."""
+
+    accuracy: float
+    f1_score: float
+    roc_auc: Optional[float] = None
+    train_rows: int
+    test_rows: int
+
+
+class ModelingReport(BaseModel):
+    """Structured report of a baseline modeling run."""
+
+    model_name: str
+    task_type: str
+    target_column: str
+    metrics: ModelMetrics
+    notes: str
+
+
+class FeatureEngineeringSpec(BaseModel):
+    """Specification for a single requested feature engineering transformation.
+
+    Used by callers (e.g. an LLM-based planner) to request a specific
+    transformation that the executor will attempt to apply safely.
+    """
+
+    feature_name: str
+    """Human-readable name for the engineered feature column."""
+
+    transformation_type: str
+    """Type of transformation: 'log1p', 'ratio', 'missing_indicator', 'count_sum'."""
+
+    columns: list[str]
+    """Columns involved in the transformation."""
+
+    parameters: dict[str, Any] = {}
+    """Optional extra parameters for the transformation."""
+
+
+class AppliedFeature(BaseModel):
+    """A feature engineering transformation that was successfully applied."""
+
+    feature_name: str
+    transformation_type: str
+    columns: list[str]
+    result_column: str
+
+
+class SkippedFeature(BaseModel):
+    """A requested feature engineering transformation that was skipped."""
+
+    feature_name: str
+    transformation_type: str
+    columns: list[str]
+    reason: str
+
+
+class FeatureEngineeringReport(BaseModel):
+    """Report from applying feature engineering transformations to a dataset."""
+
+    original_row_count: int
+    original_column_count: int
+    engineered_row_count: int
+    engineered_column_count: int
+    applied_features: list[AppliedFeature]
+    skipped_features: list[SkippedFeature]
     summary: str

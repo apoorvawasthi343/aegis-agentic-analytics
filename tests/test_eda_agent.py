@@ -1,11 +1,15 @@
 """Tests for the AEGIS Exploratory Data Analysis Agent."""
 
+import json
+
 import pytest
 
 from src.aegis.eda_agent import EDAAgent
+from src.aegis.llm import LLMClient
 from src.aegis.schemas import (
     CategoricalStat,
     DatasetProfile,
+    EDAFinding,
     EDAReport,
 )
 
@@ -365,3 +369,200 @@ def test_summary_counts_total_findings() -> None:
 
     assert len(report.findings) == 2
     assert report.summary == "2 EDA finding(s) detected."
+
+
+# ---------------------------------------------------------------------------
+# LLM integration tests
+# ---------------------------------------------------------------------------
+
+class FakeLLMClient(LLMClient):
+    """Minimal fake LLM client for EDA tests."""
+
+    def __init__(self, response_text: str = "") -> None:
+        self.response_text = response_text
+        self.received_prompt: str | None = None
+        self.received_schema: type | None = None
+
+    def generate(
+        self,
+        prompt: str,
+        response_schema: type | None = None,
+    ) -> str:
+        self.received_prompt = prompt
+        self.received_schema = response_schema
+        return self.response_text
+
+
+def test_eda_agent_works_without_llm_client() -> None:
+    """EDAAgent should still work when no LLM client is provided."""
+    profile = _make_profile(
+        target_column="churn",
+        target_distribution={"no": 90, "yes": 10},
+        row_count=100,
+    )
+
+    agent = EDAAgent()
+    report = agent.analyze(profile)
+
+    imbalance_findings = [
+        f for f in report.findings if f.finding_type == "target_imbalance"
+    ]
+    assert len(imbalance_findings) == 1
+    assert imbalance_findings[0].importance == "high"
+    assert "LLM" not in report.summary
+
+
+def test_eda_llm_finding_is_merged_into_report() -> None:
+    """With a fake LLM client, the LLM EDA finding is added to the final report."""
+    llm_client = FakeLLMClient(
+        response_text=json.dumps(
+            {
+                "findings": [
+                    {
+                        "finding_type": "possible_predictive_signal",
+                        "importance": "medium",
+                        "columns": ["age", "income"],
+                        "evidence": "The profile shows a moderate numeric spread in both columns.",
+                        "interpretation": "Age and income may carry useful signal for modeling.",
+                        "modeling_implication": "Consider exploring interactions between these features.",
+                    }
+                ],
+                "summary": "LLM EDA analysis completed.",
+            }
+        )
+    )
+
+    profile = _make_profile(
+        row_count=100,
+        categorical_statistics={
+            "status": CategoricalStat(most_frequent_value="active", most_frequent_count=90)
+        },
+    )
+
+    agent = EDAAgent(llm_client=llm_client)
+    report = agent.analyze(profile)
+
+    finding_types = {f.finding_type for f in report.findings}
+    assert "dominant_category" in finding_types
+    assert "possible_predictive_signal" in finding_types
+
+    assert len(report.findings) == 2
+    assert report.summary == "2 EDA finding(s) detected."
+
+    # Verify the LLM client received EDAReport as the response_schema
+    assert llm_client.received_schema is EDAReport
+
+
+def test_eda_prompt_is_passed_to_fake_client() -> None:
+    """The EDA prompt built from the profile is actually passed to the LLM client."""
+    llm_client = FakeLLMClient(
+        response_text=json.dumps({"findings": [], "summary": ""})
+    )
+
+    profile = _make_profile(row_count=10)
+
+    agent = EDAAgent(llm_client=llm_client)
+    agent.analyze(profile)
+
+    assert llm_client.received_prompt is not None
+    assert "row_count" in llm_client.received_prompt
+    assert "10" in llm_client.received_prompt
+    assert "exploratory data analyst" in llm_client.received_prompt
+
+
+def test_eda_invalid_llm_json_does_not_crash_agent() -> None:
+    """Invalid JSON from the EDA LLM does not crash the agent."""
+    llm_client = FakeLLMClient(response_text="this is not json")
+
+    profile = _make_profile(row_count=10)
+
+    agent = EDAAgent(llm_client=llm_client)
+    report = agent.analyze(profile)
+
+    assert len(report.findings) == 0
+    assert "LLM reasoning was requested" in report.summary
+
+
+def test_eda_deterministic_findings_survive_llm_failure() -> None:
+    """Deterministic EDA findings are still present when LLM validation fails."""
+    llm_client = FakeLLMClient(response_text="not valid json")
+
+    profile = _make_profile(
+        row_count=100,
+        categorical_statistics={
+            "flag": CategoricalStat(most_frequent_value="none", most_frequent_count=90)
+        },
+    )
+
+    agent = EDAAgent(llm_client=llm_client)
+    report = agent.analyze(profile)
+
+    dominant_findings = [
+        f for f in report.findings if f.finding_type == "dominant_category"
+    ]
+    assert len(dominant_findings) == 1
+    assert dominant_findings[0].importance == "medium"
+
+    assert "LLM reasoning was requested" in report.summary
+
+
+def test_eda_valid_structured_llm_json_is_accepted() -> None:
+    """Valid structured JSON matching EDAReport is accepted."""
+    valid_json = EDAReport(
+        findings=[
+            EDAFinding(
+                finding_type="llm_eda_finding",
+                importance="low",
+                columns=["validated_column"],
+                evidence="This finding was accepted by Pydantic validation.",
+                interpretation="An LLM-derived EDA observation.",
+                modeling_implication="Use validated findings.",
+            )
+        ],
+        summary="LLM validated structured EDA output.",
+    ).model_dump_json()
+
+    llm_client = FakeLLMClient(response_text=valid_json)
+
+    profile = _make_profile(row_count=10)
+
+    agent = EDAAgent(llm_client=llm_client)
+    report = agent.analyze(profile)
+
+    llm_findings = [
+        f for f in report.findings if f.finding_type == "llm_eda_finding"
+    ]
+    assert len(llm_findings) == 1
+    assert llm_findings[0].columns == ["validated_column"]
+
+
+def test_eda_invalid_structured_output_falls_back_safely() -> None:
+    """Invalid structured LLM output does not crash; deterministic findings remain."""
+    # Simulate LLM returning malformed JSON that would fail Pydantic validation
+    llm_client = FakeLLMClient(response_text='{"invalid": "structure"}')
+
+    profile = _make_profile(
+        row_count=100,
+        categorical_statistics={
+            "category": CategoricalStat(most_frequent_value="A", most_frequent_count=92)
+        },
+    )
+
+    agent = EDAAgent(llm_client=llm_client)
+    report = agent.analyze(profile)
+
+    # Deterministic findings must still be present
+    dominant_findings = [
+        f for f in report.findings if f.finding_type == "dominant_category"
+    ]
+    assert len(dominant_findings) == 1
+    assert dominant_findings[0].importance == "medium"
+
+    # LLM findings should NOT be present (validation failed)
+    llm_findings = [
+        f for f in report.findings if f.finding_type not in ("dominant_category",)
+    ]
+    assert len(llm_findings) == 0
+
+    # Summary should note the LLM validation failure
+    assert "LLM reasoning was requested" in report.summary

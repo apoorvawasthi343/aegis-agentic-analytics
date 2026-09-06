@@ -8,6 +8,7 @@ dependencies = [
     "numpy",
     "pydantic",
     "ollama",
+    "scikit-learn",
 ]
 
 [project.optional-dependencies]

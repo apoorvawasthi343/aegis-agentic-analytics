@@ -3,8 +3,15 @@
 The EDAAgent analyzes dataset profiles and produces structured
 exploratory data analysis reports describing patterns, distributions,
 relationships, imbalance, skewness, and potential predictive signals.
+
+It implements deterministic EDA rules and optionally integrates with an
+LLM client for additional reasoning.
 """
 
+import json
+
+from src.aegis.llm import LLMClient
+from src.aegis.prompts import build_eda_prompt
 from src.aegis.schemas import DatasetProfile, EDAFinding, EDAReport
 
 
@@ -12,9 +19,18 @@ class EDAAgent:
     """Agent that analyzes dataset profiles and produces EDA reports.
 
     Implements deterministic EDA rules for target imbalance and dominant
-    categorical columns. In later milestone steps it may be extended with
-    additional EDA rules and optional LLM reasoning.
+    categorical columns. Optionally integrates with an LLM client for
+    additional exploratory analysis reasoning.
     """
+
+    def __init__(self, llm_client: LLMClient | None = None) -> None:
+        """Initialize the EDA agent.
+
+        Args:
+            llm_client: Optional LLM client to use for LLM-based reasoning.
+                If None, the agent runs only deterministic checks.
+        """
+        self.llm_client = llm_client
 
     def analyze(self, profile: DatasetProfile) -> EDAReport:
         """Analyze a dataset profile and return an exploratory data analysis report.
@@ -25,6 +41,9 @@ class EDAAgent:
           available).
         - Dominant categorical columns (when categorical_statistics and row_count
           are available).
+
+        If an LLM client is provided, also performs LLM-based reasoning and merges
+        those findings with the deterministic ones.
 
         Args:
             profile: The DatasetProfile to analyze.
@@ -135,13 +154,45 @@ class EDAAgent:
                     )
                 )
 
+        # --- LLM-based reasoning (optional) ---
+        llm_findings: list[EDAFinding] = []
+        llm_error_note: str | None = None
+
+        if self.llm_client is not None:
+            prompt = build_eda_prompt(profile)
+            raw_response = self.llm_client.generate(
+                prompt,
+                response_schema=EDAReport,
+            )
+
+            try:
+                response_data = json.loads(raw_response)
+                llm_report = EDAReport.model_validate(response_data)
+                llm_findings = list(llm_report.findings)
+            except Exception:
+                llm_error_note = (
+                    "LLM reasoning was requested but the response could not be "
+                    "validated. Deterministic findings are preserved."
+                )
+
+        # Merge deterministic and LLM findings.
+        combined_findings = list(findings) + llm_findings
+
         # --- Summary ---
-        if findings:
-            summary = f"{len(findings)} EDA finding(s) detected."
+        if llm_error_note:
+            if combined_findings:
+                summary = (
+                    f"{len(combined_findings)} EDA finding(s) detected. "
+                    f"{llm_error_note}"
+                )
+            else:
+                summary = llm_error_note
+        elif combined_findings:
+            summary = f"{len(combined_findings)} EDA finding(s) detected."
         else:
             summary = "No EDA findings detected."
 
         return EDAReport(
-            findings=findings,
+            findings=combined_findings,
             summary=summary,
         )
