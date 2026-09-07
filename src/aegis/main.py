@@ -14,7 +14,7 @@ import pandas as pd
 from src.aegis.critic_agent import CriticAgent
 from src.aegis.eda_agent import EDAAgent
 from src.aegis.data_quality_agent import DataQualityAgent
-from src.aegis.feature_engineering_agent import FeatureEngineeringAgent
+from src.aegis.agents.feature_engineering_agent import FeatureEngineeringAgent
 from src.aegis.feature_engineering_executor import FeatureEngineeringExecutor
 from src.aegis.loader import load_csv
 from src.aegis.model_comparison import ModelComparison

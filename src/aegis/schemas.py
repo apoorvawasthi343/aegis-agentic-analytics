@@ -126,6 +126,48 @@ class SkippedFeature(BaseModel):
     reason: str
 
 
+class FeatureEngineeringSuggestions(BaseModel):
+    """Structured LLM response for feature engineering suggestions.
+
+    Used as ``response_schema`` when requesting LLM-based feature
+    engineering recommendations from the feature engineering agent.
+    """
+
+    specs: list[FeatureEngineeringSpec]
+    summary: str = ""
+
+
+    @staticmethod
+    def extract_llm_json(text: str):
+        """Extract and parse JSON from an LLM text response.
+
+        Handles responses wrapped in markdown code blocks (```json ... ```
+        ) and other common LLM output formats. Returns the parsed object
+        (dict or list) or None if no valid JSON could be extracted.
+        """
+        import json
+
+        text = text.strip()
+
+        # Strip markdown code fences if present
+        start = text.find("```")
+        if start != -1:
+            end = text.rfind("```")
+            if end != -1 and end > start:
+                content = text[start + 3 : end].strip()
+                newline = content.find("\n")
+                if newline != -1:
+                    lang = content[:newline].strip().lower()
+                    if lang in ("json", "javascript", "js"):
+                        content = content[newline + 1 :].strip()
+                text = content
+
+        try:
+            return json.loads(text)
+        except json.JSONDecodeError:
+            return None
+
+
 class FeatureEngineeringReport(BaseModel):
     """Report from applying feature engineering transformations to a dataset."""
 
@@ -168,8 +210,8 @@ class OrchestrationResult(BaseModel):
     """Complete orchestration result from the AEGIS pipeline.
 
     Collects outputs from all pipeline stages:
-    profiling → data quality → EDA → feature engineering →
-    modeling comparison → critic review
+    profiling -> data quality -> EDA -> feature engineering ->
+    modeling comparison -> critic review
     """
 
     dataset_profile: DatasetProfile

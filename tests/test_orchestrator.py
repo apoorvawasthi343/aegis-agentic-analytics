@@ -7,7 +7,7 @@ import pytest
 from src.aegis.critic_agent import CriticAgent
 from src.aegis.data_quality_agent import DataQualityAgent
 from src.aegis.eda_agent import EDAAgent
-from src.aegis.feature_engineering_agent import FeatureEngineeringAgent
+from src.aegis.agents.feature_engineering_agent import FeatureEngineeringAgent
 from src.aegis.feature_engineering_executor import FeatureEngineeringExecutor
 from src.aegis.model_comparison import ModelComparison
 from src.aegis.orchestrator import AEGISOrchestrator
@@ -568,9 +568,9 @@ def test_orchestrator_real_feature_engineering_agent_produces_specs() -> None:
     log_specs = [s for s in specs if s.transformation_type == "log1p"]
     assert len(log_specs) == 3
     log_names = {s.feature_name for s in log_specs}
-    assert "log_positive_col" in log_names
-    assert "log_col_with_na" in log_names
-    assert "log_col_without_na" in log_names
+    assert "log1p_positive_col" in log_names
+    assert "log1p_col_with_na" in log_names
+    assert "log1p_col_without_na" in log_names
 
     # col_with_na has missing values → missing_indicator
     missing_specs = [s for s in specs if s.transformation_type == "missing_indicator"]
