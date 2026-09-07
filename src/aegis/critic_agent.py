@@ -38,12 +38,16 @@ class CriticAgent:
         rejected: list[str] = []
         leakage_warning = False
 
-        # Determine which metrics improved
+        # Determine which metrics improved and declined
         accuracy_improved = comparison.accuracy_change > 0
         f1_improved = comparison.f1_change > 0
         roc_auc_improved = (
             comparison.roc_auc_change is not None
             and comparison.roc_auc_change > 0
+        )
+        roc_auc_declined = (
+            comparison.roc_auc_change is not None
+            and comparison.roc_auc_change < 0
         )
         any_improved = accuracy_improved or f1_improved or roc_auc_improved
 
@@ -55,8 +59,8 @@ class CriticAgent:
             reasons.append("No engineered features were successfully created.")
             decision = "reject"
 
-        # Rule 1: Clear overall improvement (both primary metrics up) → accept
-        elif accuracy_improved and f1_improved:
+        # Rule 1: Both primary metrics improve and no meaningful metric declines → accept
+        elif accuracy_improved and f1_improved and not roc_auc_declined:
             accepted = list(comparison.features_created)
             rejected = list(comparison.features_skipped)
             reasons.append(
@@ -69,8 +73,22 @@ class CriticAgent:
                 )
             decision = "accept"
 
-        # Rule 3: Some metrics improve, others decline → review
-        elif any_improved:
+        # Rule 2: No metric improvement → reject
+        elif not any_improved:
+            rejected = list(comparison.features_created)
+            rejected.extend(comparison.features_skipped)
+            reasons.append(
+                f"No performance improvement: accuracy Δ{comparison.accuracy_change:+.4f}, "
+                f"F1 Δ{comparison.f1_change:+.4f}."
+            )
+            if roc_auc_improved:
+                reasons.append(
+                    f"ROC-AUC Δ{comparison.roc_auc_change:+.4f} — no meaningful change."
+                )
+            decision = "reject"
+
+        # Rule 3: Some metrics improve while others decline → review
+        else:
             accepted = list(comparison.features_created)
             rejected = list(comparison.features_skipped)
             mixed_parts: list[str] = []
@@ -84,11 +102,9 @@ class CriticAgent:
                     f"F1 improved by {comparison.f1_change:+.4f} "
                     f"but accuracy declined by {comparison.accuracy_change:+.4f}"
                 )
-            elif roc_auc_improved and not accuracy_improved and not f1_improved:
+            if roc_auc_declined:
                 mixed_parts.append(
-                    f"ROC-AUC improved by {comparison.roc_auc_change:+.4f} "
-                    f"but accuracy declined by {comparison.accuracy_change:+.4f} "
-                    f"and F1 declined by {comparison.f1_change:+.4f}"
+                    f"ROC-AUC declined by {comparison.roc_auc_change:+.4f}"
                 )
             if mixed_parts:
                 reasons.append(
@@ -98,20 +114,6 @@ class CriticAgent:
                 "Engineered features show some benefit but not uniformly positive."
             )
             decision = "review"
-
-        # Rule 2: No metric improvement → reject
-        else:
-            rejected = list(comparison.features_created)
-            rejected.extend(comparison.features_skipped)
-            reasons.append(
-                f"No performance improvement: accuracy Δ{comparison.accuracy_change:+.4f}, "
-                f"F1 Δ{comparison.f1_change:+.4f}."
-            )
-            if roc_auc_improved:
-                reasons.append(
-                    f"ROC-AUC Δ{comparison.roc_auc_change:+.4f} — no meaningful change."
-                )
-            decision = "reject"
 
         # Build summary
         summary_parts = [

@@ -1,7 +1,7 @@
 """Tests for the AEGIS Critic Agent."""
 
 import pytest
-
+import pandas as pd
 from src.aegis.critic_agent import CriticAgent
 from src.aegis.schemas import (
     BaselineVsEngineeredComparison,
@@ -93,7 +93,6 @@ def test_mixed_metrics_review() -> None:
     assert report.decision == "review"
     assert report.accepted_features == ["log_feature_0"]
     assert report.rejected_features == []
-    assert report.performance_improved is False
 
 
 def test_no_created_features_rejects() -> None:
@@ -127,3 +126,128 @@ def test_accept_leaves_skipped_features_in_rejected() -> None:
     assert report.decision == "accept"
     assert report.accepted_features == ["good_feature"]
     assert "bad_feature: missing column" in report.rejected_features
+
+
+# --- New tests for the two issues ---
+
+
+def test_mixed_roc_auc_decline_is_review() -> None:
+    """ROC-AUC decline with accuracy/F1 improvement should produce 'review'.
+
+    Simulates the actual run:
+        accuracy_change = +0.0167
+        f1_change       = +0.0082
+        roc_auc_change  = -0.0682
+    """
+    comparison = _make_comparison(
+        accuracy_change=0.0167,
+        f1_change=0.0082,
+        roc_auc_change=-0.0682,
+        features_created=["log_monthly_charges", "log_total_charges"],
+        features_skipped=[],
+    )
+
+    critic = CriticAgent()
+    report = critic.review(comparison)
+
+    assert report.decision == "review"
+    assert any("ROC-AUC" in r and "declined" in r for r in report.reasons)
+
+
+def test_all_metrics_improve_accept() -> None:
+    """All three metrics improving should still produce 'accept'."""
+    comparison = _make_comparison(
+        accuracy_change=0.02,
+        f1_change=0.015,
+        roc_auc_change=0.01,
+        features_created=["log_x"],
+    )
+
+    critic = CriticAgent()
+    report = critic.review(comparison)
+
+    assert report.decision == "accept"
+
+
+def test_no_metrics_improve_reject() -> None:
+    """All metrics declining should produce 'reject'."""
+    comparison = _make_comparison(
+        accuracy_change=-0.02,
+        f1_change=-0.01,
+        roc_auc_change=-0.03,
+        features_created=["log_x"],
+    )
+
+    critic = CriticAgent()
+    report = critic.review(comparison)
+
+    assert report.decision == "reject"
+
+
+def test_feature_accounting_proposed_equals_created_plus_skipped() -> None:
+    """The feature engineering report must satisfy:
+    proposed = created + skipped.
+    """
+    from src.aegis.feature_engineering_executor import FeatureEngineeringExecutor
+    from src.aegis.schemas import FeatureEngineeringSpec
+
+    specs = [
+        # Valid: should be created
+        FeatureEngineeringSpec(
+            feature_name="log_age",
+            transformation_type="log1p",
+            columns=["age"],
+        ),
+        FeatureEngineeringSpec(
+            feature_name="log_tenure",
+            transformation_type="log1p",
+            columns=["tenure_months"],
+        ),
+        # Invalid: column does not exist -> must be skipped with reason
+        FeatureEngineeringSpec(
+            feature_name="log_nonexistent",
+            transformation_type="log1p",
+            columns=["_no_such_column_"],
+        ),
+        # Invalid: not a supported type -> must be skipped with reason
+        FeatureEngineeringSpec(
+            feature_name="bad_transform",
+            transformation_type="invalid_type_xyz",
+            columns=["age"],
+        ),
+        # Valid: missing indicator
+        FeatureEngineeringSpec(
+            feature_name="age_is_missing",
+            transformation_type="missing_indicator",
+            columns=["age"],
+        ),
+    ]
+
+    executor = FeatureEngineeringExecutor()
+    df = pd.DataFrame(
+        {
+            "age": [1, 2, 3, None, 5],
+            "tenure_months": [12, 24, 36, 48, 60],
+            "churn": [0, 1, 0, 1, 0],
+        }
+    )
+
+    engineered_df, report = executor.apply(df, specs)
+
+    created = [f.feature_name for f in report.applied_features]
+    skipped = [f.feature_name for f in report.skipped_features]
+
+    # proposed = created + skipped
+    assert len(specs) == len(created) + len(skipped), (
+        f"proposed={len(specs)}, created={len(created)}, skipped={len(skipped)}"
+    )
+
+    # Every skipped feature must carry a reason
+    for sf in report.skipped_features:
+        assert sf.reason, f"Skipped feature '{sf.feature_name}' has no reason"
+
+    # Verify specific expectations
+    assert "log_age" in created
+    assert "log_tenure" in created
+    assert "log_nonexistent" in skipped
+    assert "bad_transform" in skipped

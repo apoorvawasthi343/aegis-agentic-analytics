@@ -4,13 +4,13 @@ from unittest.mock import MagicMock
 
 import pandas as pd
 import pytest
-
 from src.aegis.critic_agent import CriticAgent
 from src.aegis.data_quality_agent import DataQualityAgent
 from src.aegis.eda_agent import EDAAgent
+from src.aegis.feature_engineering_agent import FeatureEngineeringAgent
 from src.aegis.feature_engineering_executor import FeatureEngineeringExecutor
 from src.aegis.model_comparison import ModelComparison
-from src.aegis.orchestrator import AEGISOrchestrator, _default_feature_planner
+from src.aegis.orchestrator import AEGISOrchestrator
 from src.aegis.schemas import (
     AppliedFeature,
     BaselineVsEngineeredComparison,
@@ -138,17 +138,21 @@ def _make_mock_profiler() -> MagicMock:
     return profiler
 
 
-def _make_mock_feature_planner() -> MagicMock:
-    """Create a mock feature planner that returns feature specs."""
-    planner = MagicMock()
-    planner.return_value = [
-        FeatureEngineeringSpec(
-            feature_name="log_num_1",
-            transformation_type="log1p",
-            columns=["num_1"],
-        ),
-    ]
-    return planner
+def _make_mock_feature_engineering_agent(
+    specs: list[FeatureEngineeringSpec] | None = None,
+) -> MagicMock:
+    """Create a mock FeatureEngineeringAgent that returns feature specs."""
+    agent = MagicMock(spec=FeatureEngineeringAgent)
+    if specs is None:
+        specs = [
+            FeatureEngineeringSpec(
+                feature_name="log_num_1",
+                transformation_type="log1p",
+                columns=["num_1"],
+            ),
+        ]
+    agent.recommend.return_value = specs
+    return agent
 
 
 # ---------------------------------------------------------------------------
@@ -262,7 +266,7 @@ def test_orchestrator_run_runs_model_comparison() -> None:
         critic_agent=CriticAgent(),
         loader=MagicMock(return_value=df),
         profiler=MagicMock(return_value=_make_minimal_profile()),
-        feature_planner=_make_mock_feature_planner(),
+        feature_planner=_make_mock_feature_engineering_agent().recommend,
     )
 
     result = orchestrator.run("dummy.csv", "target")
@@ -274,7 +278,7 @@ def test_orchestrator_run_runs_model_comparison() -> None:
 
 
 def test_orchestrator_passes_feature_specs_to_comparison() -> None:
-    """Orchestrator should pass feature specs from planner to comparison."""
+    """Orchestrator should pass feature specs from FeatureEngineeringAgent to comparison."""
     df = _make_minimal_df()
     feature_specs = [
         FeatureEngineeringSpec(
@@ -283,7 +287,7 @@ def test_orchestrator_passes_feature_specs_to_comparison() -> None:
             columns=["num_1"],
         ),
     ]
-    feature_planner = MagicMock(return_value=feature_specs)
+    fe_agent = _make_mock_feature_engineering_agent(specs=feature_specs)
     model_comparison = _make_mock_model_comparison()
     orchestrator = AEGISOrchestrator(
         data_quality_agent=_make_mock_data_quality_agent(),
@@ -293,12 +297,12 @@ def test_orchestrator_passes_feature_specs_to_comparison() -> None:
         critic_agent=CriticAgent(),
         loader=MagicMock(return_value=df),
         profiler=MagicMock(return_value=_make_minimal_profile()),
-        feature_planner=feature_planner,
+        feature_planner=fe_agent.recommend,
     )
 
     result = orchestrator.run("dummy.csv", "target")
 
-    feature_planner.assert_called_once_with(df, "target")
+    fe_agent.recommend.assert_called_once_with(df, "target")
     model_comparison.compare.assert_called_once()
     call_args = model_comparison.compare.call_args
     assert call_args[1]["feature_specs"] == feature_specs
@@ -355,7 +359,7 @@ def test_orchestrator_result_contains_all_stages() -> None:
         critic_agent=CriticAgent(),
         loader=MagicMock(return_value=_make_minimal_df()),
         profiler=MagicMock(return_value=_make_minimal_profile()),
-        feature_planner=_make_mock_feature_planner(),
+        feature_planner=_make_mock_feature_engineering_agent().recommend,
     )
 
     result = orchestrator.run("dummy.csv", "target")
@@ -394,7 +398,7 @@ def test_orchestrator_result_created_features_from_comparison() -> None:
         critic_agent=CriticAgent(),
         loader=MagicMock(return_value=_make_minimal_df()),
         profiler=MagicMock(return_value=_make_minimal_profile()),
-        feature_planner=_make_mock_feature_planner(),
+        feature_planner=_make_mock_feature_engineering_agent().recommend,
     )
 
     result = orchestrator.run("dummy.csv", "target")
@@ -426,7 +430,7 @@ def test_orchestrator_result_skipped_features_from_comparison() -> None:
         critic_agent=CriticAgent(),
         loader=MagicMock(return_value=_make_minimal_df()),
         profiler=MagicMock(return_value=_make_minimal_profile()),
-        feature_planner=_make_mock_feature_planner(),
+        feature_planner=_make_mock_feature_engineering_agent().recommend,
     )
 
     result = orchestrator.run("dummy.csv", "target")
@@ -469,7 +473,7 @@ def test_orchestrator_critic_review_is_run() -> None:
         critic_agent=critic_agent,
         loader=MagicMock(return_value=_make_minimal_df()),
         profiler=MagicMock(return_value=_make_minimal_profile()),
-        feature_planner=_make_mock_feature_planner(),
+        feature_planner=_make_mock_feature_engineering_agent().recommend,
     )
 
     result = orchestrator.run("dummy.csv", "target")
@@ -488,7 +492,7 @@ def test_orchestrator_final_result_validates() -> None:
         critic_agent=CriticAgent(),
         loader=MagicMock(return_value=_make_minimal_df()),
         profiler=MagicMock(return_value=_make_minimal_profile()),
-        feature_planner=_make_mock_feature_planner(),
+        feature_planner=_make_mock_feature_engineering_agent().recommend,
     )
 
     result = orchestrator.run("dummy.csv", "target")
@@ -499,61 +503,7 @@ def test_orchestrator_final_result_validates() -> None:
     assert len(result_json) > 0
 
 
-def test_orchestrator_without_feature_planner_skips_engineering() -> None:
-    """Without a feature planner, the orchestrator should still work."""
-    orchestrator = AEGISOrchestrator(
-        data_quality_agent=_make_mock_data_quality_agent(),
-        eda_agent=_make_mock_eda_agent(),
-        feature_executor=FeatureEngineeringExecutor(),
-        model_comparison=_make_mock_model_comparison(),
-        critic_agent=CriticAgent(),
-        loader=MagicMock(return_value=_make_minimal_df()),
-        profiler=MagicMock(return_value=_make_minimal_profile()),
-        # No feature_planner provided
-    )
-
-    result = orchestrator.run("dummy.csv", "target")
-
-    assert isinstance(result, OrchestrationResult)
-    assert result.created_features is not None
-
-
-def test_default_feature_planner_identifies_log_transformable_columns() -> None:
-    """Default planner should suggest log1p for positive numeric columns."""
-    df = pd.DataFrame(
-        {
-            "positive_col": [1.0, 2.0, 3.0, 4.0],
-            "negative_col": [-1.0, -2.0, -3.0, -4.0],
-            "target": [0, 0, 1, 1],
-        }
-    )
-
-    specs = _default_feature_planner(df, "target")
-
-    # Only positive_col should get a log transform
-    log_specs = [s for s in specs if s.transformation_type == "log1p"]
-    assert len(log_specs) == 1
-    assert log_specs[0].feature_name == "log_positive_col"
-
-
-def test_default_feature_planner_identifies_missing_indicator_columns() -> None:
-    """Default planner should suggest missing indicators for columns with NaNs."""
-    df = pd.DataFrame(
-        {
-            "col_with_na": [1.0, None, 3.0, 4.0],
-            "col_without_na": [1.0, 2.0, 3.0, 4.0],
-            "target": [0, 0, 1, 1],
-        }
-    )
-
-    specs = _default_feature_planner(df, "target")
-
-    missing_specs = [s for s in specs if s.transformation_type == "missing_indicator"]
-    assert len(missing_specs) == 1
-    assert missing_specs[0].feature_name == "col_with_na_is_missing"
-
-
-def test_orchestrator_no_planner_means_no_features_engineered() -> None:
+def test_orchestrator_without_feature_engineering_agent_skips_engineering() -> None:
     """Without a feature_planner, no features should be created.
 
     This verifies that the orchestrator does NOT auto-invent feature
@@ -587,51 +537,47 @@ def test_orchestrator_no_planner_means_no_features_engineered() -> None:
 
     result = orchestrator.run("dummy.csv", "target")
 
-    # The comparison should have been called with empty feature specs
     model_comparison.compare.assert_called_once()
     call_args = model_comparison.compare.call_args
     assert call_args[1]["feature_specs"] == []
 
-    # Result should show no features created
     assert result.created_features == []
     assert result.skipped_features == []
 
 
-def test_orchestrator_default_planner_is_opt_in_not_default() -> None:
-    """The _default_feature_planner must be explicitly passed to be used.
-
-    This test verifies that constructing the orchestrator WITHOUT a
-    feature_planner does NOT use _default_feature_planner automatically.
-    """
-    model_comparison = MagicMock(spec=ModelComparison)
-    comparison = BaselineVsEngineeredComparison(
-        baseline_metrics=ModelMetrics(accuracy=0.8, f1_score=0.79, roc_auc=None, train_rows=80, test_rows=20),
-        engineered_metrics=ModelMetrics(accuracy=0.8, f1_score=0.79, roc_auc=None, train_rows=80, test_rows=20),
-        features_created=[],
-        features_skipped=[],
-        accuracy_change=0.0,
-        f1_change=0.0,
-        roc_auc_change=None,
-        improved=False,
-        summary="No features engineered",
-    )
-    model_comparison.compare.return_value = comparison
-
-    # Construct WITHOUT passing feature_planner
-    orchestrator = AEGISOrchestrator(
-        data_quality_agent=_make_mock_data_quality_agent(),
-        eda_agent=_make_mock_eda_agent(),
-        feature_executor=FeatureEngineeringExecutor(),
-        model_comparison=model_comparison,
-        critic_agent=CriticAgent(),
-        loader=MagicMock(return_value=_make_minimal_df()),
-        profiler=MagicMock(return_value=_make_minimal_profile()),
+def test_orchestrator_real_feature_engineering_agent_produces_specs() -> None:
+    """The real FeatureEngineeringAgent should produce deterministic specs."""
+    df = pd.DataFrame(
+        {
+            # positive_col: all positive → gets log1p + no missing → no missing_indicator
+            "positive_col": [1.0, 2.0, 3.0, 4.0],
+            # negative_col: has negatives → NO log1p; no missing → no missing_indicator
+            "negative_col": [-1.0, -2.0, -3.0, -4.0],
+            # col_with_na: after dropna all positive → gets log1p; has missing → missing_indicator
+            "col_with_na": [1.0, None, 3.0, 4.0],
+            # col_without_na: all positive → gets log1p; no missing → no missing_indicator
+            "col_without_na": [1.0, 2.0, 3.0, 4.0],
+            "target": [0, 0, 1, 1],
+        }
     )
 
-    result = orchestrator.run("dummy.csv", "target")
+    fe_agent = FeatureEngineeringAgent(llm_client=None)
+    specs = fe_agent.recommend(df, "target")
 
-    # The comparison should receive empty specs — not auto-generated ones
-    model_comparison.compare.assert_called_once()
-    call_args = model_comparison.compare.call_args
-    assert call_args[1]["feature_specs"] == []
-    assert result.created_features == []
+    # Three columns qualify for log1p: positive_col, col_with_na (after dropna), col_without_na
+    log_specs = [s for s in specs if s.transformation_type == "log1p"]
+    assert len(log_specs) == 3
+    log_names = {s.feature_name for s in log_specs}
+    assert "log_positive_col" in log_names
+    assert "log_col_with_na" in log_names
+    assert "log_col_without_na" in log_names
+
+    # col_with_na has missing values → missing_indicator
+    missing_specs = [s for s in specs if s.transformation_type == "missing_indicator"]
+    assert len(missing_specs) == 1
+    assert missing_specs[0].feature_name == "col_with_na_is_missing"
+    assert missing_specs[0].columns == ["col_with_na"]
+
+    # negative_col should get nothing (negative values block log1p, no missing)
+    negative_specs = [s for s in specs if s.feature_name.startswith("negative_col")]
+    assert len(negative_specs) == 0
